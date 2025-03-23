@@ -1,33 +1,40 @@
-import unittest
+from inspect import signature
 import numpy as np
 import pandas as pd
 import polars as pl
-import polars.testing
 from typing import Union, Mapping
+
 
 ArrayType1D = Union[np.ndarray, pl.Series, pd.Series, pd.Index, pd.Categorical]
 ArrayType2D = Union[np.ndarray, pl.DataFrame, pd.DataFrame, pd.MultiIndex]
 
 
 def get_array_name(array: Union[np.ndarray, pd.Series, pl.Series]):
-    name = getattr(array, 'name', None)
-    if name is None or name == '':
+    name = getattr(array, "name", None)
+    if name is None or name == "":
         return None
     return name
 
 
-def convert_array_inputs_to_dict(arrays) -> dict:
+class TempName(str): ...
+
+
+def convert_array_inputs_to_dict(arrays, temp_name_root: str = "_arr_") -> dict:
     if isinstance(arrays, Mapping):
         return dict(arrays)
     elif isinstance(arrays, (tuple, list)):
         names = map(get_array_name, arrays)
-        keys = [name or f'arr_{i}' for i, name in enumerate(names)]
+        keys = [
+            name or TempName(f"{temp_name_root}{i}") for i, name in enumerate(names)
+        ]
         return dict(zip(keys, arrays))  # Fixed: arrays instead of array
     elif isinstance(arrays, np.ndarray) and arrays.ndim == 2:
         return convert_array_inputs_to_dict(list(arrays.T))
-    elif isinstance(arrays, (pd.Series, pl.Series, np.ndarray, pd.Index, pd.Categorical)):
+    elif isinstance(
+        arrays, (pd.Series, pl.Series, np.ndarray, pd.Index, pd.Categorical)
+    ):
         name = get_array_name(arrays)
-        return {name if name is not None else 'arr_0': arrays}
+        return {name if name is not None else TempName(f"{temp_name_root}0"): arrays}
     elif isinstance(arrays, (pl.DataFrame, pd.DataFrame)):
         return {key: arrays[key] for key in arrays.columns}
     else:
@@ -38,10 +45,12 @@ import functools
 import pandas as pd
 from typing import Callable, Any, TypeVar, cast
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
 
 
-def check_data_inputs_aligned(*args_to_check, check_index: bool = True) -> Callable[[F], F]:
+def check_data_inputs_aligned(
+    *args_to_check, check_index: bool = True
+) -> Callable[[F], F]:
     """
     Factory function that returns a decorator which ensures all arguments passed to the
     decorated function have equal length and, if pandas objects and check_index is True,
@@ -60,31 +69,30 @@ def check_data_inputs_aligned(*args_to_check, check_index: bool = True) -> Calla
             if not args:
                 return func(*args, **kwargs)
 
+            arguments = signature(func).bind(*args, **kwargs).arguments
+            lengths = {}
             # Extract args that have a length
-            if args_to_check is None:
-                sized_args = [arg for arg in args if hasattr(arg, '__len__')]
-            else:
-                sized_args = args_to_check
-            if not sized_args:
-                return func(*args, **kwargs)
-
-            # Check all args have the same length
-            first_arg = sized_args[0]
-            first_len = len(first_arg)
-
-            for arg in sized_args[1:]:
-                if arg is not None and len(arg) != first_len:
-                    raise ValueError(f"All arguments must have equal length. "
-                                     f"Expected length {first_len}, got {len(arg)}")
+            for k, x in arguments.items():
+                if not args_to_check or k in args_to_check:
+                    if x is not None:
+                        lengths[k] = len(x)
+            if len(set(lengths.values())) > 1:
+                raise ValueError(
+                    f"All arguments must have equal length. " f"Got lengths: {lengths}"
+                )
 
             # Check pandas objects share the same index
             if check_index:
-                pandas_args = [arg for arg in args if isinstance(arg, (pd.Series, pd.DataFrame))]
+                pandas_args = [
+                    arg for arg in args if isinstance(arg, (pd.Series, pd.DataFrame))
+                ]
                 if pandas_args:
                     first_index = pandas_args[0].index
                     for arg in pandas_args[1:]:
                         if not first_index.equals(arg.index):
-                            raise ValueError("All pandas objects must share the same index")
+                            raise ValueError(
+                                "All pandas objects must share the same index"
+                            )
 
             return func(*args, **kwargs)
 
@@ -96,11 +104,13 @@ def check_data_inputs_aligned(*args_to_check, check_index: bool = True) -> Calla
 import concurrent.futures
 from typing import TypeVar, Callable, List, Any, Optional
 
-T = TypeVar('T')
-R = TypeVar('R')
+T = TypeVar("T")
+R = TypeVar("R")
 
 
-def parallel_map(func: Callable[[T], R], items: List[T], max_workers: Optional[int] = None) -> List[R]:
+def parallel_map(
+    func: Callable[[T], R], items: List[T], max_workers: Optional[int] = None
+) -> List[R]:
     """
     Apply a function to each item in a list in parallel using concurrent.futures.
 
@@ -123,7 +133,9 @@ def parallel_map(func: Callable[[T], R], items: List[T], max_workers: Optional[i
     # ThreadPoolExecutor is better for I/O-bound tasks
     with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks and store the future objects
-        future_to_index = {executor.submit(func, item): i for i, item in enumerate(items)}
+        future_to_index = {
+            executor.submit(func, item): i for i, item in enumerate(items)
+        }
 
         # Collect results in the original order
         results = [None] * len(items)

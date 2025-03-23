@@ -1,11 +1,8 @@
-from typing import Union
 from functools import cached_property
-from pathlib import Path
 from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-import polars as pl
 
 from sklearn import linear_model as lm
 
@@ -56,8 +53,7 @@ class GroupScatter:
 
     def plot(self, **plot_kwargs):
         bin_means = (self.bins.categories.right + self.bins.categories.left) / 2
-        ax = pd.Series(self.y_means.values, bin_means).plot(**plot_kwargs, style='o')
-        self.regression_curve.plot(style='-', ax=ax)
+        ax = pd.Series(self.y_means.values, bin_means).plot(**plot_kwargs, style="o")
+        self.regression_curve.plot(style="-", ax=ax)
 
         return ax
-
