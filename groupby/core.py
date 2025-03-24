@@ -1,4 +1,3 @@
-import inspect
 from typing import Callable
 from functools import cached_property, wraps
 from collections.abc import Sequence, Mapping
@@ -6,13 +5,12 @@ from collections.abc import Sequence, Mapping
 import numpy as np
 import pandas as pd
 import polars as pl
-import numba as nb
 
+from .numba import group_sum, group_mean, group_min, group_max, group_count
 from .util import (
     ArrayType1D,
     ArrayType2D,
     convert_array_inputs_to_dict,
-    check_data_inputs_aligned,
     get_array_name,
     TempName,
 )
@@ -20,39 +18,6 @@ from .util import (
 ArrayCollection = (
     ArrayType1D | ArrayType2D | Sequence[ArrayType1D] | Mapping[ArrayType1D]
 )
-
-
-MIN_INT = np.iinfo(np.int64).min
-
-
-@nb.njit
-def _isnull_float(x):
-    return x != x
-
-
-@nb.njit
-def _isnull_int(x):
-    return x == MIN_INT
-
-
-@nb.njit(parallel=False, nogil=False)
-def _group_count(
-    group_key: np.ndarray,
-    values: ArrayType1D,
-    null_check: Callable,
-    mask: np.ndarray,
-    ngroups: int,
-):
-    count = np.zeros(ngroups, dtype=nb.int_)
-
-    for i in nb.prange(len(group_key)):
-        if len(mask) and not mask[i]:
-            continue
-        key = group_key[i]
-        if not null_check(values[i]):
-            count[key] = count[key] + 1
-
-    return count
 
 
 def array_to_series(arr: ArrayType1D):
@@ -88,173 +53,6 @@ def _validate_input_indexes(indexes):
             raise ValueError
 
     return non_trivial[0]
-
-
-def _prepare_mask_for_numba(mask):
-    if mask is None:
-        mask = np.array([])
-    else:
-        mask = np.asarray(mask)
-        if mask.dtype.kind != "b":
-            raise TypeError(f"mask must of Boolean type. Got {mask.dtype}")
-    return mask
-
-
-@nb.njit
-def _update_target(
-    i: int,
-    group_key: np.ndarray,
-    values: np.ndarray,
-    target: np.ndarray,
-    mask: np.ndarray,
-    reduce_func: Callable,
-    null_check: Callable,
-):
-    key = group_key[i]
-    val = values[i]
-    if null_check(val) or (len(mask) and not mask[i]):
-        return
-
-    target[key] = reduce_func(target[key], val)
-
-
-@nb.njit
-def _nb_sum(x, y):
-    return x + y
-
-
-@nb.njit(parallel=False, nogil=False)
-def _group_sum(
-    group_key: np.ndarray,
-    values: np.ndarray,
-    target: np.ndarray,
-    mask: np.ndarray,
-    null_check: Callable,
-):
-    for i in nb.prange(len(group_key)):
-        _update_target(
-            i,
-            group_key=group_key,
-            values=values,
-            target=target,
-            mask=mask,
-            reduce_func=_nb_sum,
-            null_check=null_check,
-        )
-
-    return target
-
-
-@check_data_inputs_aligned("group_key", "values", "mask")
-def _group_func_wrap(
-    nb_func: Callable,
-    group_key: ArrayType1D,
-    values: ArrayType1D,
-    ngroups: int,
-    mask: ArrayType1D = None,
-):
-    if values.dtype.kind == "f":
-        out_type = values.dtype
-        null_check = _isnull_float
-    else:
-        out_type = int
-        null_check = _isnull_int
-
-    target = np.zeros(ngroups, dtype=out_type)
-    mask = _prepare_mask_for_numba(mask)
-    values = np.asarray(values)
-
-    kwargs = locals().copy()
-    return nb_func(
-        **{
-            arg_name: kwargs[arg_name]
-            for arg_name in inspect.signature(nb_func).parameters
-        }
-    )
-
-
-@check_data_inputs_aligned("group_key", "values", "mask")
-def group_sum(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
-):
-    return _group_func_wrap(_group_sum, **locals())
-
-
-# @nb.njit(parallel=False, nogil=False)
-# def _group_count(
-#     group_key: np.ndarray,
-#     values: np.ndarray,
-#     target: np.ndarray,
-#     mask: np.ndarray,
-#     null_check: Callable,
-# ):
-#     for i in nb.prange(len(group_key)):
-#         _update_target(
-#             i,
-#             group_key=group_key,
-#             value=1,
-#             target=target,
-#             mask=mask,
-#             groupby_func=_nb_sum,
-#             null_check=null_check,
-#         )
-#
-#     return target
-
-
-@nb.njit(parallel=False, nogil=False)
-def group_size(group_key: np.ndarray, mask: np.ndarray, ngroups: int):
-    count = np.zeros(ngroups, dtype=nb.int_)
-
-    for i in nb.prange(len(group_key)):
-        if len(mask) and not mask[i]:
-            continue
-        key = group_key[i]
-        count[key] = count[key] + 1
-
-    return count
-
-
-@nb.njit(parallel=False, nogil=False)
-def _group_count(
-    group_key: np.ndarray,
-    values: ArrayType1D,
-    null_check: Callable,
-    mask: np.ndarray,
-    ngroups: int,
-):
-    count = np.zeros(ngroups, dtype=nb.int_)
-
-    for i in nb.prange(len(group_key)):
-        if len(mask) and not mask[i]:
-            continue
-        key = group_key[i]
-        if not null_check(values[i]):
-            count[key] = count[key] + 1
-
-    return count
-
-
-@check_data_inputs_aligned("group_key", "values", "mask")
-def group_count(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
-):
-    mask = _prepare_mask_for_numba(mask)
-    kwargs = locals().copy()
-    if values.dtype.kind == "f":
-        null_check = _isnull_float
-    else:
-        null_check = _isnull_int
-
-    return _group_count(**kwargs, null_check=null_check)
-
-
-@check_data_inputs_aligned("group_key", "values", "mask")
-def group_mean(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
-):
-    kwargs = locals().copy()
-    return group_sum(**kwargs) / group_count(**kwargs)
 
 
 def combomethod(method):
@@ -337,9 +135,21 @@ class GroupBy:
         return out
 
     @combomethod
+    def count(self, values: ArrayCollection, mask: ArrayType1D = None):
+        return self._apply_gb_func(group_count, values=values, mask=mask)
+
+    @combomethod
     def sum(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_sum, values=values, mask=mask)
 
     @combomethod
     def mean(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_mean, values=values, mask=mask)
+
+    @combomethod
+    def min(self, values: ArrayCollection, mask: ArrayType1D = None):
+        return self._apply_gb_func(group_min, values=values, mask=mask)
+
+    @combomethod
+    def max(self, values: ArrayCollection, mask: ArrayType1D = None):
+        return self._apply_gb_func(group_max, values=values, mask=mask)
