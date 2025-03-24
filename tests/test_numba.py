@@ -1,21 +1,33 @@
 import pytest
 import numpy as np
 
-from groupby.numba import group_sum, group_mean, group_count, group_min, group_max, MIN_INT, isnull_int, isnull_float
+from groupby.numba import (
+    group_sum,
+    group_mean,
+    group_count,
+    group_min,
+    group_max,
+    MIN_INT,
+    isnull_int,
+    isnull_float,
+)
 from groupby import numba as gbnb
 
 
-@pytest.mark.parametrize("values", [
-    (3, 2),
-    (2, 3),
-    (-1, -5),
-    (-5, 1),
-    (1.2, 3.14),
-    (-1.1516, 0),
-])
+@pytest.mark.parametrize(
+    "values",
+    [
+        (3, 2),
+        (2, 3),
+        (-1, -5),
+        (-5, 1),
+        (1.2, 3.14),
+        (-1.1516, 0),
+    ],
+)
 @pytest.mark.parametrize("method", [sum, min, max])
 def test_scalar_methods(method, values):
-    result = getattr(gbnb, f'nb_{method.__name__}')(*values)
+    result = getattr(gbnb, f"nb_{method.__name__}")(*values)
     expected = method(values)
     assert result == expected
 
@@ -250,20 +262,17 @@ class TestGroupMean:
             group_mean(group_key, values, ngroups=3, mask=mask)
 
 
-@pytest.mark.parametrize("dtype", [float, int])
+@pytest.mark.parametrize("dtype", [float, int, bool, np.uint64])
 def test_group_min(dtype):
     # Test that mask must have same length as group_key if not empty
     group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
-    values = np.arange(5, dtype=dtype)
+    values = np.arange(5).astype(dtype)
     result = group_min(group_key, values, ngroups=3)
     expected = np.array([0, 1, 3], dtype=dtype)
     np.testing.assert_array_equal(result, expected)
 
-    values[0] = np.nan
-    result = group_min(group_key, values, ngroups=3)
-    expected = np.array([2, 1, 3], dtype=dtype)
-    np.testing.assert_array_equal(result, expected)
-
-
-
-
+    if dtype in (float, int):
+        values[0] = np.nan if dtype == float else MIN_INT
+        result = group_min(group_key, values, ngroups=3)
+        expected = np.array([2, 1, 3], dtype=dtype)
+        np.testing.assert_array_equal(result, expected)

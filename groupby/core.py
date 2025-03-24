@@ -30,7 +30,7 @@ def array_to_series(arr: ArrayType1D):
 def val_to_numpy(val: ArrayType1D):
     try:
         return val.to_numpy()
-    except:
+    except AttributeError:
         return np.asarray(val)
 
 
@@ -102,7 +102,6 @@ class GroupBy:
     def group_ikey(self):
         return self.grouper.group_info[0]
 
-    # @combomethod
     def _apply_gb_func(
         self,
         func: Callable,
@@ -127,9 +126,7 @@ class GroupBy:
                 out.name = None
 
         if mask is not None:
-            count = group_sum(
-                group_key=self.group_ikey, values=mask, mask=None, ngroups=self.ngroups
-            )
+            count = self.count(values=values, mask=mask)
             out = out.loc[count > 0]
 
         return out

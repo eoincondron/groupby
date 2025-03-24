@@ -21,7 +21,7 @@ class TestGroupBy:
         self, method, key_dtype, key_type, value_dtype, value_type, use_mask
     ):
         key = key_type([1, 1, 2, 1, 3, 3, 6, 1, 6], dtype=key_dtype)
-        value = value_type([-1, 0, 4, 3, 8, 6, 3, 1, 12], dtype=value_dtype)
+        value = value_type([-1, 0, 4, 3.5, 8, 6, 3, 1, 12], dtype=value_dtype)
 
         if use_mask:
             mask = pd_mask = key.astype(int) != 1
@@ -31,6 +31,7 @@ class TestGroupBy:
         result = getattr(GroupBy, method)(key, value, mask=mask)
 
         expected = getattr(pd.Series(value)[pd_mask].groupby(key[pd_mask]), method)()
+
         pd.testing.assert_series_equal(result, expected, check_dtype=method != "mean")
 
         gb = GroupBy(key)
@@ -44,7 +45,7 @@ class TestGroupBy:
         null = MIN_INT if dtype == int else np.nan
         key = np.array([1, 1, 2, 1, 3, 3, 6, 1, 6])
         value = pd.Series([-1, 0, null, 3, 8, 6, null, 1, null], dtype=dtype)
-        not_null = value != null if dtype == int else value.isnull()
+        not_null = value != null if dtype == int else value.notnull()
         if use_mask:
             mask = value < 6
             pd_mask = mask & not_null
@@ -52,6 +53,5 @@ class TestGroupBy:
             mask = None
             pd_mask = not_null
         result = getattr(GroupBy, method)(key, value, mask=mask)
-
         expected = value[pd_mask].groupby(key[pd_mask]).agg(method)
         pd.testing.assert_series_equal(result, expected)
