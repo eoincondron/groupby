@@ -135,6 +135,7 @@ class GroupBy:
         func: Callable,
         values: ArrayCollection,
         mask: ArrayType1D = None,
+        transform: bool = False,
     ):
         value_dict = convert_array_inputs_to_dict(values)
         np_values = list(map(val_to_numpy, value_dict.values()))
@@ -146,41 +147,73 @@ class GroupBy:
         )
         out_dict = {}
         for key, (result, seen) in zip(value_dict, results):
-            out_dict[key] = pd.Series(result[seen], self.result_index[seen])
-        out = pd.DataFrame(out_dict)
+            if transform:
+                result = out_dict[key] = pd.Series(
+                    result[self.group_ikey], self._group_df.index
+                )
+            else:
+                result = out_dict[key] = pd.Series(
+                    result[seen], self.result_index[seen]
+                )
 
-        return_1d = len(value_dict) == 1 and isinstance(values, ArrayType1D)
-        if return_1d:
-            out = out.iloc[:, 0]
-            if get_array_name(values) is None:
-                out.name = None
+            return_1d = len(value_dict) == 1 and isinstance(values, ArrayType1D)
+            if return_1d:
+                out = result
+                if get_array_name(values) is None:
+                    out.name = None
+            else:
+                out = pd.DataFrame(out_dict)
 
-        if mask is not None:
+        if not transform and mask is not None:
             count = self.sum(values=mask)
             out = out.loc[count > 0]
 
         return out
 
     @groupby_method
-    def count(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_count, values=values, mask=mask)
+    def count(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_count, values=values, mask=mask, transform=transform
+        )
 
     @groupby_method
-    def sum(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_sum, values=values, mask=mask)
+    def sum(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_sum, values=values, mask=mask, transform=transform
+        )
 
     @groupby_method
-    def mean(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_mean, values=values, mask=mask)
+    def mean(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_mean, values=values, mask=mask, transform=transform
+        )
 
     @groupby_method
-    def min(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_min, values=values, mask=mask)
+    def min(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_min, values=values, mask=mask, transform=transform
+        )
 
     @groupby_method
-    def max(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_max, values=values, mask=mask)
+    def max(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_max, values=values, mask=mask, transform=transform
+        )
 
     @groupby_method
-    def max(self, values: ArrayCollection, mask: ArrayType1D = None):
-        return self._apply_gb_func(group_max, values=values, mask=mask)
+    def max(
+        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    ):
+        return self._apply_gb_func(
+            group_max, values=values, mask=mask, transform=transform
+        )
