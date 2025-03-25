@@ -11,22 +11,30 @@ from groupby.util import check_data_inputs_aligned, ArrayType1D
 MIN_INT = np.iinfo(np.int64).min
 MAX_INT = np.iinfo(np.int64).max
 
+
 def is_null(x):
     return np.isnan(x)
+
 
 @overload(is_null)
 def jit_is_null(x):
     if isinstance(x, nb.types.Float) or isinstance(x, float):
+
         def is_null(x):
             return np.isnan(x)
+
         return is_null
     if isinstance(x, nb.types.Integer):
+
         def is_null(x):
             return x == MIN_INT
+
         return is_null
     elif isinstance(x, nb.types.Boolean):
+
         def is_null(x):
             return False
+
         return is_null
 
 
