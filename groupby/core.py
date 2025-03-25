@@ -55,12 +55,40 @@ def _validate_input_indexes(indexes):
     return non_trivial[0]
 
 
-def combomethod(method):
+def groupby_method(method):
+
     @wraps(method)
-    def wrapper(key, values, mask=None):
-        if not isinstance(key, GroupBy):
-            key = GroupBy(key)
-        return method(key, values, mask)
+    def wrapper(
+        group_key: ArrayCollection, values: ArrayCollection, mask: ArrayType1D = None
+    ):
+        if not isinstance(group_key, GroupBy):
+            group_key = GroupBy(group_key)
+        return method(group_key, values, mask)
+
+    __doc__ = f"""
+    Calculate the group-wise {method.__name__} of the given values over the groups defined by `key`
+    
+    Parameters
+    ----------
+    key: An array/Series or a container of same, such as dict, list or DataFrame
+        Defines the groups. May be a single dimension like an array or Series, 
+        or multi-dimensional like a list/dict of 1-D arrays or 2-D array/DataFrame. 
+    values: An array/Series or a container of same, such as dict, list or DataFrame
+        The values to be aggregated. May be a single dimension like an array or Series, 
+        or multi-dimensional like a list/dict of 1-D arrays or 2-D array/DataFrame. 
+    mask: array/Series
+        Optional Boolean array which filters elements out of the calculations
+        
+    Returns
+    -------
+    pd.Series / pd.DataFrame
+    
+    The result of the group-by calculation. 
+    A Series is returned when `values` is a single array/Series, otherwise a DataFrame. 
+    The index of the result has one level per array/column in the group key. 
+        
+    """
+    wrapper.__doc__ = __doc__
 
     return wrapper
 
@@ -116,8 +144,10 @@ class GroupBy:
             ),
             np_values,
         )
-        out_dict = dict(zip(values, results))
-        out = pd.DataFrame(out_dict, index=self.result_index)
+        out_dict = {}
+        for key, (result, seen) in zip(value_dict, results):
+            out_dict[key] = pd.Series(result[seen], self.result_index[seen])
+        out = pd.DataFrame(out_dict)
 
         return_1d = len(value_dict) == 1 and isinstance(values, ArrayType1D)
         if return_1d:
@@ -126,27 +156,31 @@ class GroupBy:
                 out.name = None
 
         if mask is not None:
-            count = self.count(values=values, mask=mask)
+            count = self.sum(values=mask)
             out = out.loc[count > 0]
 
         return out
 
-    @combomethod
+    @groupby_method
     def count(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_count, values=values, mask=mask)
 
-    @combomethod
+    @groupby_method
     def sum(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_sum, values=values, mask=mask)
 
-    @combomethod
+    @groupby_method
     def mean(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_mean, values=values, mask=mask)
 
-    @combomethod
+    @groupby_method
     def min(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_min, values=values, mask=mask)
 
-    @combomethod
+    @groupby_method
+    def max(self, values: ArrayCollection, mask: ArrayType1D = None):
+        return self._apply_gb_func(group_max, values=values, mask=mask)
+
+    @groupby_method
     def max(self, values: ArrayCollection, mask: ArrayType1D = None):
         return self._apply_gb_func(group_max, values=values, mask=mask)
