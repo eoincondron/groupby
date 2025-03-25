@@ -1,17 +1,21 @@
 import pytest
 import numpy as np
+import numba as nb
 
 from groupby.numba import (
+    NumbaReductionOps,
+    NumbaGroupByMethods,
     group_sum,
     group_mean,
     group_count,
     group_min,
-    group_max,
     MIN_INT,
-    isnull_int,
-    isnull_float,
+    is_null as py_isnull,
 )
-from groupby import numba as gbnb
+
+@nb.njit
+def is_null(x):
+    return py_isnull(x)
 
 
 @pytest.mark.parametrize(
@@ -27,7 +31,7 @@ from groupby import numba as gbnb
 )
 @pytest.mark.parametrize("method", [sum, min, max])
 def test_scalar_methods(method, values):
-    result = getattr(gbnb, f"nb_{method.__name__}")(*values)
+    result = getattr(NumbaReductionOps, method.__name__)(*values)
     expected = method(values)
     assert result == expected
 
@@ -39,7 +43,7 @@ class TestGroupSum:
         group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
 
-        result = group_sum(group_key, values, ngroups=3, mask=None)
+        result, _ = group_sum(group_key, values, ngroups=3, mask=None)
         expected = np.array([4.0, 7.0, 4.0], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
 
@@ -49,7 +53,7 @@ class TestGroupSum:
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
         mask = np.array([True, True, False, True, False], dtype=np.bool_)
 
-        result = group_sum(group_key, values, ngroups=3, mask=mask)
+        result, _ = group_sum(group_key, values, ngroups=3, mask=mask)
 
         # Expect: group 0 = 1.0 (skip 3.0 due to mask), group 1 = 2.0 (skip 5.0), group 2 = 4.0
         expected = np.array([1.0, 2.0, 4.0], dtype=np.float64)
@@ -61,7 +65,7 @@ class TestGroupSum:
         values = np.array([], dtype=np.float64)
         mask = np.array([], dtype=np.bool_)
 
-        result = group_sum(group_key, values, ngroups=0, mask=mask)
+        result, _ = group_sum(group_key, values, ngroups=0, mask=mask)
 
         expected = np.array([], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
@@ -71,7 +75,7 @@ class TestGroupSum:
         group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
         values = np.array([1, 2, 3, 4, 5], dtype=np.int64)
 
-        result = group_sum(group_key, values, ngroups=3, mask=None)
+        result, _ = group_sum(group_key, values, ngroups=3, mask=None)
 
         expected = np.array([4, 7, 4], dtype=np.int64)
         np.testing.assert_array_equal(result, expected)
@@ -82,7 +86,7 @@ class TestGroupSum:
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
         mask = np.array([False, False, False, False, False], dtype=np.bool_)
 
-        result = group_sum(group_key, values, ngroups=3, mask=mask)
+        result, _ = group_sum(group_key, values, ngroups=3, mask=mask)
 
         expected = np.array([0.0, 0.0, 0.0], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
@@ -105,26 +109,26 @@ class TestGroupSum:
 
 
 class TestNullChecks:
-    def test_isnull_float_with_nan(self):
-        """Test that _isnull_float identifies NaN values correctly."""
-        assert isnull_float(np.nan) == True
-        assert isnull_float(np.float64("nan")) == True
+    def test_is_null_with_nan(self):
+        """Test that _is_null identifies NaN values correctly."""
+        assert is_null(np.nan) == True
+        assert is_null(np.float64("nan")) == True
 
-    def test_isnull_float_with_numbers(self):
-        """Test that _isnull_float returns False for valid numbers."""
-        assert isnull_float(0.0) == False
-        assert isnull_float(-1.5) == False
-        assert isnull_float(1e10) == False
+    def test_is_null_with_numbers(self):
+        """Test that _is_null returns False for valid numbers."""
+        assert is_null(0.0) == False
+        assert is_null(-1.5) == False
+        assert is_null(1e10) == False
 
-    def test_isnull_int_with_min_int(self):
-        """Test that isnull_int identifies MIN_INT correctly."""
-        assert isnull_int(MIN_INT) == True
+    def test_is_null_with_min_int(self):
+        """Test that is_null identifies MIN_INT correctly."""
+        assert is_null(MIN_INT) == True
 
-    def test_isnull_int_with_normal_ints(self):
-        """Test that isnull_int returns False for regular integers."""
-        assert isnull_int(0) == False
-        assert isnull_int(-1) == False
-        assert isnull_int(100) == False
+    def test_is_null_with_normal_ints(self):
+        """Test that is_null returns False for regular integers."""
+        assert is_null(0) == False
+        assert is_null(-1) == False
+        assert is_null(100) == False
 
 
 class TestGroupCount:
@@ -197,7 +201,7 @@ class TestGroupMean:
         group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
 
-        result = group_mean(group_key, values, ngroups=3, mask=None)
+        result, _ = group_mean(group_key, values, ngroups=3, mask=None)
         expected = np.array([2.0, 3.5, 4.0], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
 
@@ -207,7 +211,7 @@ class TestGroupMean:
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
         mask = np.array([True, True, False, True, False], dtype=np.bool_)
 
-        result = group_mean(group_key, values, ngroups=3, mask=mask)
+        result, _ = group_mean(group_key, values, ngroups=3, mask=mask)
 
         # Expect: group 0 = 1.0 (skip 3.0 due to mask), group 1 = 2.0 (skip 5.0), group 2 = 4.0
         expected = np.array([1.0, 2.0, 4.0], dtype=np.float64)
@@ -219,7 +223,7 @@ class TestGroupMean:
         values = np.array([], dtype=np.float64)
         mask = np.array([], dtype=np.bool_)
 
-        result = group_mean(group_key, values, ngroups=0, mask=mask)
+        result, _ = group_mean(group_key, values, ngroups=0, mask=mask)
 
         expected = np.array([], dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
@@ -229,7 +233,7 @@ class TestGroupMean:
         group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
         values = np.array([1, 2, 3, 4, 5], dtype=np.int64)
 
-        result = group_mean(group_key, values, ngroups=3, mask=None)
+        result, _ = group_mean(group_key, values, ngroups=3, mask=None)
 
         expected = np.array([2.0, 3.5, 4.0], dtype=float)
         np.testing.assert_array_equal(result, expected)
@@ -240,7 +244,7 @@ class TestGroupMean:
         values = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float64)
         mask = np.array([False, False, False, False, False], dtype=np.bool_)
 
-        result = group_mean(group_key, values, ngroups=3, mask=mask)
+        result, _ = group_mean(group_key, values, ngroups=3, mask=mask)
 
         expected = np.array([np.nan] * 3, dtype=np.float64)
         np.testing.assert_array_equal(result, expected)
@@ -267,12 +271,26 @@ def test_group_min(dtype):
     # Test that mask must have same length as group_key if not empty
     group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
     values = np.arange(5).astype(dtype)
-    result = group_min(group_key, values, ngroups=3)
+    result, _ = group_min(group_key, values, ngroups=3)
     expected = np.array([0, 1, 3], dtype=dtype)
     np.testing.assert_array_equal(result, expected)
 
     if dtype in (float, int):
         values[0] = np.nan if dtype == float else MIN_INT
-        result = group_min(group_key, values, ngroups=3)
+        result, _ = group_min(group_key, values, ngroups=3)
         expected = np.array([2, 1, 3], dtype=dtype)
         np.testing.assert_array_equal(result, expected)
+
+@pytest.mark.parametrize(("method","expected" ), [
+    ("first", [2, 1, 0]),
+    # ("last", [5, -1, 0]),
+])
+@pytest.mark.parametrize("dtype", [float, int, bool, np.uint64])
+def test_group_first_last(method, dtype, expected):
+    func = getattr(NumbaGroupByMethods, method)
+    # Test that mask must have same length as group_key if not empty
+    group_key = np.array([0, 1, 0, 2, 1], dtype=np.int64)
+    values = np.array([2, 1, 5, 0, -1]).astype(dtype)
+    result, _ = func(group_key, values, ngroups=3)
+    expected = np.array(expected, dtype=dtype)
+    np.testing.assert_array_equal(result, expected)

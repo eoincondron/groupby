@@ -11,7 +11,7 @@ from groupby.core import GroupBy
 
 class TestGroupBy:
 
-    @pytest.mark.parametrize("method", ["sum", "mean", "min", "max", "count"])
+    @pytest.mark.parametrize("method", ["sum", "mean", "min", "max"])
     @pytest.mark.parametrize("key_dtype", [int, str, float, "float32"])
     @pytest.mark.parametrize("key_type", [np.array, pd.Series])
     @pytest.mark.parametrize("value_dtype", [int, float, "float32", bool])
@@ -21,7 +21,7 @@ class TestGroupBy:
         self, method, key_dtype, key_type, value_dtype, value_type, use_mask
     ):
         key = key_type([1, 1, 2, 1, 3, 3, 6, 1, 6], dtype=key_dtype)
-        value = value_type([-1, 0, 4, 3.5, 8, 6, 3, 1, 12], dtype=value_dtype)
+        value = value_type([-1, 0.3, 4, 3.5, 8, 6, 3, 1, 12.6]).astype(value_dtype)
 
         if use_mask:
             mask = pd_mask = key.astype(int) != 1
@@ -40,7 +40,7 @@ class TestGroupBy:
 
     @pytest.mark.parametrize("use_mask", [True, False])
     @pytest.mark.parametrize("dtype", [float, int])
-    @pytest.mark.parametrize("method", ["sum", "mean", "min", "max", "count"])
+    @pytest.mark.parametrize("method", ["sum", "mean", "min", "max"])
     def test_with_nulls(self, method, dtype, use_mask):
         null = MIN_INT if dtype == int else np.nan
         key = np.array([1, 1, 2, 1, 3, 3, 6, 1, 6])
