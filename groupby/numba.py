@@ -81,7 +81,7 @@ class NumbaReductionOps:
         return x if is_null(y) else y
 
 
-@nb.njit(parallel=False, nogil=False, fastmath=True)
+@nb.njit(parallel=True, nogil=False, fastmath=True)
 def _group_by_iterator(
     group_key: np.ndarray,
     values: np.ndarray,
