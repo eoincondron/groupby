@@ -13,6 +13,7 @@ from groupby.numba import (
     is_null as py_isnull,
 )
 
+
 @nb.njit
 def is_null(x):
     return py_isnull(x)
@@ -281,10 +282,14 @@ def test_group_min(dtype):
         expected = np.array([2, 1, 3], dtype=dtype)
         np.testing.assert_array_equal(result, expected)
 
-@pytest.mark.parametrize(("method","expected" ), [
-    ("first", [2, 1, 0]),
-    # ("last", [5, -1, 0]),
-])
+
+@pytest.mark.parametrize(
+    ("method", "expected"),
+    [
+        ("first", [2, 1, 0]),
+        # ("last", [5, -1, 0]),
+    ],
+)
 @pytest.mark.parametrize("dtype", [float, int, bool, np.uint64])
 def test_group_first_last(method, dtype, expected):
     func = getattr(NumbaGroupByMethods, method)
