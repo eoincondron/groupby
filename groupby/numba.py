@@ -37,21 +37,21 @@ def jit_is_null(x):
 
         return is_null
 
+def _scalar_func_decorator(func):
+    return staticmethod(nb.njit(nogil=True)(func))
+
 
 class NumbaReductionOps:
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def add_one(x, y):
         return x + 1
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def min(x, y):
         return x if x <= y else y
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def max(x, y):
         return x if x >= y else y
 
@@ -60,8 +60,7 @@ class NumbaReductionOps:
     def sum(x, y):
         return x + y
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def first(x, y):
         return x
 
