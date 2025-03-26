@@ -8,8 +8,9 @@ from typing import Union, Mapping
 ArrayType1D = Union[np.ndarray, pl.Series, pd.Series, pd.Index, pd.Categorical]
 ArrayType2D = Union[np.ndarray, pl.DataFrame, pd.DataFrame, pd.MultiIndex]
 
+
 def _remove_self_from_kwargs(kwargs: dict):
-    return {k: v for k, v in kwargs.items() if k not in ('self', 'cls')}
+    return {k: v for k, v in kwargs.items() if k not in ("self", "cls")}
 
 
 def get_array_name(array: Union[np.ndarray, pd.Series, pl.Series]):

@@ -40,6 +40,7 @@ def jit_is_null(x):
 
         return is_null
 
+
 def _scalar_func_decorator(func):
     return staticmethod(nb.njit(nogil=True)(func))
 
@@ -47,7 +48,7 @@ def _scalar_func_decorator(func):
 class NumbaReductionOps:
 
     @_scalar_func_decorator
-    def add_one(x, y):
+    def count(x, y):
         return x + 1
 
     @_scalar_func_decorator
@@ -67,18 +68,15 @@ class NumbaReductionOps:
     def first(x, y):
         return x
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def first_skipna(x, y):
         return y if is_null(x) else x
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def last(x, y):
         return y
 
-    @staticmethod
-    @nb.njit
+    @_scalar_func_decorator
     def last_skipna(x, y, is_null: Callable):
         return x if is_null(y) else y
 
@@ -98,8 +96,6 @@ def _group_by_iterator(
         if is_null(val) or (len(mask) and not mask[i]):
             continue
 
-        # target[key] += val
-
         if seen[key]:
             target[key] = reduce_func(target[key], val)
         else:
@@ -107,7 +103,6 @@ def _group_by_iterator(
             seen[key] = True
 
     return target
-
 
 
 def _prepare_mask_for_numba(mask):
@@ -133,12 +128,12 @@ def get_initial_value_for_dtype(dtype):
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def _chunk_groupby_args(
-        n_chunks: int,
-        group_key: np.ndarray,
-        values: np.ndarray,
-        target: np.ndarray,
-        mask: np.ndarray,
-        reduce_func: Callable,
+    n_chunks: int,
+    group_key: np.ndarray,
+    values: np.ndarray,
+    target: np.ndarray,
+    mask: np.ndarray,
+    reduce_func: Callable,
 ):
     mask = _prepare_mask_for_numba(mask)
     values = np.asarray(values)
@@ -150,7 +145,7 @@ def _chunk_groupby_args(
         kwargs = dict(
             group_key=group_key[slice_],
             values=values[slice_],
-            target = target.copy(),
+            target=target.copy(),
             mask=mask[slice_],
             reduce_func=reduce_func,
         )
@@ -162,7 +157,7 @@ def _chunk_groupby_args(
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def _group_func_wrap(
-    reduce_func: Callable,
+    reduce_func: str,
     group_key: ArrayType1D,
     values: ArrayType1D,
     ngroups: int,
@@ -179,22 +174,33 @@ def _group_func_wrap(
         values=values,
         target=target,
         mask=mask,
-        reduce_func=reduce_func,
+        reduce_func=getattr(NumbaReductionOps, reduce_func),
     )
 
     if n_chunks == 1:
         return _group_by_iterator(**kwargs)
     else:
+        try:
+            reduce_func_vec = dict(
+                count=sum,
+                sum=sum,
+                max=np.maximum,
+                min=np.minimum,
+            )[reduce_func]
+        except:
+            raise ValueError(f"Multi-threading not supported for {reduce_func}")
         chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_chunks)
         results = [None] * n_chunks
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             future_to_chunk = {
-                executor.submit(_group_by_iterator, *args.args): i for i, args in enumerate(chunked_args)
-                }
+                executor.submit(_group_by_iterator, *args.args): i
+                for i, args in enumerate(chunked_args)
+            }
             for future in concurrent.futures.as_completed(future_to_chunk):
                 chunk = future_to_chunk[future]
                 results[chunk] = future.result()
-        return reduce(reduce_func, results)
+
+        return reduce(reduce_func_vec, results)
 
 
 @nb.njit(parallel=False, nogil=False)
