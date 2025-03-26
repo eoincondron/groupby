@@ -1,3 +1,4 @@
+import operator
 from typing import Callable
 from inspect import signature
 from functools import reduce
@@ -182,8 +183,8 @@ def _group_func_wrap(
     else:
         try:
             reduce_func_vec = dict(
-                count=sum,
-                sum=sum,
+                count=operator.add,
+                sum=operator.add,
                 max=np.maximum,
                 min=np.minimum,
             )[reduce_func]
