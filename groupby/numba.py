@@ -1,4 +1,7 @@
 from typing import Callable
+from inspect import signature
+from functools import reduce
+import concurrent.futures
 
 import numba as nb
 from numba.extending import overload
@@ -80,7 +83,7 @@ class NumbaReductionOps:
         return x if is_null(y) else y
 
 
-@nb.njit(parallel=True, nogil=False, fastmath=True)
+@nb.njit(nogil=True, fastmath=False)
 def _group_by_iterator(
     group_key: np.ndarray,
     values: np.ndarray,
@@ -89,11 +92,13 @@ def _group_by_iterator(
     reduce_func: Callable,
 ):
     seen = np.zeros(len(target), dtype=nb.bool_)
-    for i in nb.prange(len(group_key)):
+    for i in range(len(group_key)):
         key = group_key[i]
         val = values[i]
         if is_null(val) or (len(mask) and not mask[i]):
             continue
+
+        # target[key] += val
 
         if seen[key]:
             target[key] = reduce_func(target[key], val)
@@ -101,12 +106,13 @@ def _group_by_iterator(
             target[key] = val
             seen[key] = True
 
-    return target, seen
+    return target
+
 
 
 def _prepare_mask_for_numba(mask):
     if mask is None:
-        mask = np.array([])
+        mask = np.array([], dtype=bool)
     else:
         mask = np.asarray(mask)
         if mask.dtype.kind != "b":
@@ -126,6 +132,35 @@ def get_initial_value_for_dtype(dtype):
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
+def _chunk_groupby_args(
+        n_chunks: int,
+        group_key: np.ndarray,
+        values: np.ndarray,
+        target: np.ndarray,
+        mask: np.ndarray,
+        reduce_func: Callable,
+):
+    mask = _prepare_mask_for_numba(mask)
+    values = np.asarray(values)
+    chunk_len = (len(group_key) + 1) // n_chunks
+
+    chunked_args = []
+    for chunk_no in range(n_chunks):
+        slice_ = slice(chunk_no * chunk_len, (chunk_no + 1) * chunk_len)
+        kwargs = dict(
+            group_key=group_key[slice_],
+            values=values[slice_],
+            target = target.copy(),
+            mask=mask[slice_],
+            reduce_func=reduce_func,
+        )
+        bound_args = signature(_group_by_iterator).bind(**kwargs)
+        chunked_args.append(bound_args)
+
+    return chunked_args
+
+
+@check_data_inputs_aligned("group_key", "values", "mask")
 def _group_func_wrap(
     reduce_func: Callable,
     group_key: ArrayType1D,
@@ -133,18 +168,33 @@ def _group_func_wrap(
     ngroups: int,
     initial_value: int | float = None,
     mask: ArrayType1D = None,
+    n_chunks: int = 1,
 ):
     target = np.full(ngroups, initial_value)
     mask = _prepare_mask_for_numba(mask)
     values = np.asarray(values)
 
-    return _group_by_iterator(
+    kwargs = dict(
         group_key=group_key,
         values=values,
         target=target,
         mask=mask,
         reduce_func=reduce_func,
     )
+
+    if n_chunks == 1:
+        return _group_by_iterator(**kwargs)
+    else:
+        chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_chunks)
+        results = [None] * n_chunks
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            future_to_chunk = {
+                executor.submit(_group_by_iterator, *args.args): i for i, args in enumerate(chunked_args)
+                }
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                chunk = future_to_chunk[future]
+                results[chunk] = future.result()
+        return reduce(reduce_func, results)
 
 
 @nb.njit(parallel=False, nogil=False)
@@ -249,3 +299,6 @@ class NumbaGroupByMethods:
     ):
         initial_value = get_initial_value_for_dtype(values.dtype)
         return _group_func_wrap(NumbaReductionOps.last, **locals())
+
+
+from pandas.core._numba.kernels import grouped_sum
