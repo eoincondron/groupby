@@ -89,8 +89,9 @@ def _group_by_iterator(
     target: np.ndarray,
     mask: np.ndarray,
     reduce_func: Callable,
+    must_see: bool = True
 ):
-    seen = np.zeros(len(target), dtype=nb.bool_)
+    seen = np.full(len(target), not must_see)
     for i in range(len(group_key)):
         key = group_key[i]
         val = values[i]
@@ -164,7 +165,7 @@ def _group_func_wrap(
     ngroups: int,
     initial_value: int | float = None,
     mask: ArrayType1D = None,
-    n_chunks: int = 1,
+    n_threads: int = 1,
 ):
     target = np.full(ngroups, initial_value)
     mask = _prepare_mask_for_numba(mask)
@@ -176,9 +177,10 @@ def _group_func_wrap(
         target=target,
         mask=mask,
         reduce_func=getattr(NumbaReductionOps, reduce_func),
+        must_see=reduce_func != 'count',
     )
 
-    if n_chunks == 1:
+    if n_threads == 1:
         return _group_by_iterator(**kwargs)
     else:
         try:
@@ -190,8 +192,8 @@ def _group_func_wrap(
             )[reduce_func]
         except:
             raise ValueError(f"Multi-threading not supported for {reduce_func}")
-        chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_chunks)
-        results = [None] * n_chunks
+        chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_threads)
+        results = [None] * n_threads
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             future_to_chunk = {
                 executor.submit(_group_by_iterator, *args.args): i
@@ -242,12 +244,12 @@ def group_sum(
         initial_value = 0
     else:
         raise TypeError("Only floats, integer and Booleans are supported")
-    return _group_func_wrap(NumbaReductionOps.sum, **locals())
+    return _group_func_wrap('sum', **locals())
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_mean(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
+    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
 ):
     kwargs = locals().copy()
     sum, seen = group_sum(**kwargs)
@@ -257,18 +259,18 @@ def group_mean(
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_min(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
+    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
 ):
     initial_value = get_initial_value_for_dtype(values.dtype)
-    return _group_func_wrap(NumbaReductionOps.min, **locals())
+    return _group_func_wrap('min', **locals())
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_max(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
+    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
 ):
     initial_value = get_initial_value_for_dtype(values.dtype)
-    return _group_func_wrap(NumbaReductionOps.max, **locals())
+    return _group_func_wrap('max', **locals())
 
 
 class NumbaGroupByMethods:
@@ -284,9 +286,9 @@ class NumbaGroupByMethods:
     ):
         initial_value = get_initial_value_for_dtype(values.dtype)
         if skip_na:
-            reduce_func = NumbaReductionOps.first_skipna
+            reduce_func = 'first_skipna'
         else:
-            reduce_func = NumbaReductionOps.first
+            reduce_func = 'first'
         return _group_func_wrap(
             reduce_func=reduce_func,
             group_key=group_key,
@@ -305,7 +307,7 @@ class NumbaGroupByMethods:
         mask: ArrayType1D = None,
     ):
         initial_value = get_initial_value_for_dtype(values.dtype)
-        return _group_func_wrap(NumbaReductionOps.last, **locals())
+        return _group_func_wrap('last', **locals())
 
 
 from pandas.core._numba.kernels import grouped_sum
