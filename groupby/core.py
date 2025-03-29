@@ -146,15 +146,13 @@ class GroupBy:
             np_values,
         )
         out_dict = {}
-        for key, (result, seen) in zip(value_dict, results):
+        for key, result in zip(value_dict, results):
             if transform:
                 result = out_dict[key] = pd.Series(
                     result[self.group_ikey], self._group_df.index
                 )
             else:
-                result = out_dict[key] = pd.Series(
-                    result[seen], self.result_index[seen]
-                )
+                result = out_dict[key] = pd.Series(result, self.result_index)
 
             return_1d = len(value_dict) == 1 and isinstance(values, ArrayType1D)
             if return_1d:

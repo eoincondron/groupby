@@ -113,14 +113,14 @@ R = TypeVar("R")
 
 
 def parallel_map(
-    func: Callable[[T], R], items: List[T], max_workers: Optional[int] = None
+    func: Callable[[T], R], arg_list: List[T], max_workers: Optional[int] = None
 ) -> List[R]:
     """
     Apply a function to each item in a list in parallel using concurrent.futures.
 
     Args:
         func: The function to apply to each item
-        items: List of items to process
+        arg_list: List of items to process
         max_workers: Maximum number of worker threads or processes (None = auto)
 
     Returns:
@@ -138,11 +138,11 @@ def parallel_map(
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks and store the future objects
         future_to_index = {
-            executor.submit(func, item): i for i, item in enumerate(items)
+            executor.submit(func, *args): i for i, args in enumerate(arg_list)
         }
 
         # Collect results in the original order
-        results = [None] * len(items)
+        results = [None] * len(arg_list)
 
         # Process completed futures as they finish
         for future in concurrent.futures.as_completed(future_to_index):
@@ -154,3 +154,21 @@ def parallel_map(
                 raise
 
     return results
+
+
+import operator
+from functools import reduce
+
+
+def parallel_reduce(reducer, reduce_func_name: str, chunked_args):
+    try:
+        reduce_func_vec = dict(
+            count=operator.add,
+            sum=operator.add,
+            max=np.maximum,
+            min=np.minimum,
+        )[reduce_func_name]
+    except:
+        raise ValueError(f"Multi-threading not supported for {reduce_func_name}")
+    results = parallel_map(reducer, chunked_args)
+    return reduce(reduce_func_vec, results)

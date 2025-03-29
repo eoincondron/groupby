@@ -9,7 +9,7 @@ from numba.extending import overload
 import numpy as np
 from pandas.api.types import is_float_dtype, is_integer_dtype, is_bool_dtype
 
-from groupby.util import check_data_inputs_aligned, ArrayType1D
+from groupby.util import check_data_inputs_aligned, ArrayType1D, parallel_reduce
 
 
 MIN_INT = np.iinfo(np.int64).min
@@ -139,16 +139,16 @@ def _chunk_groupby_args(
 ):
     mask = _prepare_mask_for_numba(mask)
     values = np.asarray(values)
-    chunk_len = (len(group_key) + 1) // n_chunks
 
     chunked_args = []
-    for chunk_no in range(n_chunks):
-        slice_ = slice(chunk_no * chunk_len, (chunk_no + 1) * chunk_len)
+    for gk, v, m in map(
+        lambda a: np.array_split(a, n_chunks), [group_key, values, mask]
+    ):
         kwargs = dict(
-            group_key=group_key[slice_],
-            values=values[slice_],
+            group_key=gk,
+            values=v,
             target=target.copy(),
-            mask=mask[slice_],
+            mask=m,
             reduce_func=reduce_func,
         )
         bound_args = signature(_group_by_iterator).bind(**kwargs)
@@ -159,7 +159,7 @@ def _chunk_groupby_args(
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def _group_func_wrap(
-    reduce_func: str,
+    reduce_func_name: str,
     group_key: ArrayType1D,
     values: ArrayType1D,
     ngroups: int,
@@ -176,67 +176,38 @@ def _group_func_wrap(
         values=values,
         target=target,
         mask=mask,
-        reduce_func=getattr(NumbaReductionOps, reduce_func),
-        must_see=reduce_func != "count",
+        reduce_func=getattr(NumbaReductionOps, reduce_func_name),
+        must_see=reduce_func_name != "count",
     )
 
     if n_threads == 1:
         return _group_by_iterator(**kwargs)
     else:
-        try:
-            reduce_func_vec = dict(
-                count=operator.add,
-                sum=operator.add,
-                max=np.maximum,
-                min=np.minimum,
-            )[reduce_func]
-        except:
-            raise ValueError(f"Multi-threading not supported for {reduce_func}")
         chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_threads)
-        results = [None] * n_threads
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            future_to_chunk = {
-                executor.submit(_group_by_iterator, *args.args): i
-                for i, args in enumerate(chunked_args)
-            }
-            for future in concurrent.futures.as_completed(future_to_chunk):
-                chunk = future_to_chunk[future]
-                results[chunk] = future.result()
-
-        return reduce(reduce_func_vec, results)
-
-
-@nb.njit(parallel=False, nogil=False)
-def _group_count(
-    group_key: np.ndarray,
-    values: np.ndarray,
-    ngroups: int,
-    mask: np.ndarray,
-):
-    out = np.zeros(ngroups)
-    for i in nb.prange(len(group_key)):
-        key = group_key[i]
-        val = values[i]
-        if is_null(val) or (len(mask) and not mask[i]):
-            continue
-
-        out[key] += 1
-
-    return out
+        return parallel_reduce(
+            _group_by_iterator, reduce_func_name, [args.args for args in chunked_args]
+        )
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_count(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
+    group_key: ArrayType1D,
+    values: ArrayType1D,
+    ngroups: int,
+    mask: ArrayType1D = None,
+    n_threads: int = 1,
 ):
-    mask = _prepare_mask_for_numba(mask)
-    values = np.asarray(values)
-    return _group_count(**locals())
+    initial_value = 0
+    return _group_func_wrap("count", **locals())
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_sum(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None
+    group_key: ArrayType1D,
+    values: ArrayType1D,
+    ngroups: int,
+    mask: ArrayType1D = None,
+    n_threads: int = 1,
 ):
     if is_float_dtype(values):
         initial_value = np.array(0.0, dtype=values.dtype)
@@ -256,9 +227,9 @@ def group_mean(
     n_threads: int = 1,
 ):
     kwargs = locals().copy()
-    sum, seen = group_sum(**kwargs)
+    sum = group_sum(**kwargs)
     count = group_count(**kwargs)
-    return sum / count, seen
+    return sum / count
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
@@ -302,7 +273,7 @@ class NumbaGroupByMethods:
         else:
             reduce_func = "first"
         return _group_func_wrap(
-            reduce_func=reduce_func,
+            reduce_func_name=reduce_func,
             group_key=group_key,
             values=values,
             ngroups=ngroups,
