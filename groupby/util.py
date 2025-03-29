@@ -135,7 +135,7 @@ def parallel_map(
     # Choose between ProcessPoolExecutor and ThreadPoolExecutor based on your needs
     # ProcessPoolExecutor is better for CPU-bound tasks
     # ThreadPoolExecutor is better for I/O-bound tasks
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks and store the future objects
         future_to_index = {
             executor.submit(func, item): i for i, item in enumerate(items)
