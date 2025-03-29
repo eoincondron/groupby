@@ -1,6 +1,6 @@
 from typing import Callable
 from functools import cached_property, wraps
-from collections.abc import Sequence, Mapping
+from collections.abc import Sequence, Mapping, List
 
 import numpy as np
 import pandas as pd
@@ -211,9 +211,42 @@ class GroupBy:
         )
 
     @groupby_method
-    def max(
-        self, values: ArrayCollection, mask: ArrayType1D = None, transform: bool = False
+    def agg(
+        self,
+        values: ArrayCollection,
+        agg_func: str | List[str],
+        mask: ArrayType1D = None,
+        transform: bool = False,
     ):
-        return self._apply_gb_func(
-            group_max, values=values, mask=mask, transform=transform
-        )
+        if np.ndim(agg_func) == 0:
+            if isinstance(agg_func, Callable):
+                agg_func = agg_func.__name__
+            func = getattr(self, agg_func)
+            return func(values, mask=mask, transform=transform)
+        elif np.ndim(agg_func) == 1:
+            values = convert_array_inputs_to_dict(values)
+            if len(agg_func) != len(values):
+                raise ValueError(
+                    f"Mismatch between number of agg funcs ({len(agg_func)}) "
+                    f"and number of values ({len(values)})"
+                )
+            return pd.concat(
+                [
+                    self.agg(v, agg_func=f, mask=mask, transform=transform)
+                    for f, v in zip(agg_func, values)
+                ],
+                axis=1,
+            )
+        else:
+            raise ValueError
+
+    @groupby_method
+    def ratio(
+        self,
+        values1: ArrayCollection,
+        values2: ArrayCollection,
+        mask: ArrayType1D = None,
+        agg_func="sum",
+    ):
+        # check for nullity
+        self.agg(values1, agg_func, mask) / self.agg(values2, agg_func, mask)
