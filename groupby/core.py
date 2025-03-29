@@ -1,6 +1,6 @@
-from typing import Callable
+from typing import Callable, List
 from functools import cached_property, wraps
-from collections.abc import Sequence, Mapping, List
+from collections.abc import Sequence, Mapping
 
 import numpy as np
 import pandas as pd
