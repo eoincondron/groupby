@@ -89,7 +89,7 @@ def _group_by_iterator(
     target: np.ndarray,
     mask: np.ndarray,
     reduce_func: Callable,
-    must_see: bool = True
+    must_see: bool = True,
 ):
     seen = np.full(len(target), not must_see)
     for i in range(len(group_key)):
@@ -177,7 +177,7 @@ def _group_func_wrap(
         target=target,
         mask=mask,
         reduce_func=getattr(NumbaReductionOps, reduce_func),
-        must_see=reduce_func != 'count',
+        must_see=reduce_func != "count",
     )
 
     if n_threads == 1:
@@ -244,12 +244,16 @@ def group_sum(
         initial_value = 0
     else:
         raise TypeError("Only floats, integer and Booleans are supported")
-    return _group_func_wrap('sum', **locals())
+    return _group_func_wrap("sum", **locals())
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_mean(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
+    group_key: ArrayType1D,
+    values: ArrayType1D,
+    ngroups: int,
+    mask: ArrayType1D = None,
+    n_threads: int = 1,
 ):
     kwargs = locals().copy()
     sum, seen = group_sum(**kwargs)
@@ -259,18 +263,26 @@ def group_mean(
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_min(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
+    group_key: ArrayType1D,
+    values: ArrayType1D,
+    ngroups: int,
+    mask: ArrayType1D = None,
+    n_threads: int = 1,
 ):
     initial_value = get_initial_value_for_dtype(values.dtype)
-    return _group_func_wrap('min', **locals())
+    return _group_func_wrap("min", **locals())
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
 def group_max(
-    group_key: ArrayType1D, values: ArrayType1D, ngroups: int, mask: ArrayType1D = None, n_threads: int = 1,
+    group_key: ArrayType1D,
+    values: ArrayType1D,
+    ngroups: int,
+    mask: ArrayType1D = None,
+    n_threads: int = 1,
 ):
     initial_value = get_initial_value_for_dtype(values.dtype)
-    return _group_func_wrap('max', **locals())
+    return _group_func_wrap("max", **locals())
 
 
 class NumbaGroupByMethods:
@@ -286,9 +298,9 @@ class NumbaGroupByMethods:
     ):
         initial_value = get_initial_value_for_dtype(values.dtype)
         if skip_na:
-            reduce_func = 'first_skipna'
+            reduce_func = "first_skipna"
         else:
-            reduce_func = 'first'
+            reduce_func = "first"
         return _group_func_wrap(
             reduce_func=reduce_func,
             group_key=group_key,
@@ -307,7 +319,28 @@ class NumbaGroupByMethods:
         mask: ArrayType1D = None,
     ):
         initial_value = get_initial_value_for_dtype(values.dtype)
-        return _group_func_wrap('last', **locals())
+        return _group_func_wrap("last", **locals())
 
 
-from pandas.core._numba.kernels import grouped_sum
+def _group_by_max_diff(group_key, values, max_diff, n_groups: int):
+    group_counter = 0
+    last_seen = np.empty(n_groups)
+    group_tracker = np.full(n_groups, -1)
+    out = np.full(len(group_key), -1)
+    for i in range(len(group_key)):
+        key = group_key[i]
+        current_group = group_tracker[key]
+        current_value = values[i]
+        if current_group == -1:
+            make_new_group = True
+        else:
+            make_new_group = (current_value - last_seen[key]) > max_diff
+
+        last_seen[key] = current_value
+        if make_new_group:
+            group_counter += 1
+            group_tracker[key] = group_counter
+
+        out[i] = group_tracker[key]
+
+    return out
