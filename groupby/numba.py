@@ -78,8 +78,12 @@ class NumbaReductionOps:
         return y
 
     @_scalar_func_decorator
-    def last_skipna(x, y, is_null: Callable):
+    def last_skipna(x, y):
         return x if is_null(y) else y
+
+    @_scalar_func_decorator
+    def sum_square(x, y):
+        return x + y**2
 
 
 @nb.njit(nogil=True, fastmath=False)

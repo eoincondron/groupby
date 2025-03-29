@@ -156,8 +156,13 @@ def parallel_map(
     return results
 
 
+import os
 import operator
 from functools import reduce
+
+
+def n_threads_from_array_length(arr_len: int):
+    return min(max(1, arr_len // int(2e6)), os.cpu_count() * 2 - 2)
 
 
 def parallel_reduce(reducer, reduce_func_name: str, chunked_args):
@@ -165,6 +170,7 @@ def parallel_reduce(reducer, reduce_func_name: str, chunked_args):
         reduce_func_vec = dict(
             count=operator.add,
             sum=operator.add,
+            sum_square=operator.add,
             max=np.maximum,
             min=np.minimum,
         )[reduce_func_name]
