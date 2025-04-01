@@ -7,7 +7,7 @@ import pandas as pd
 import polars as pl
 
 from .numba import group_count, group_max, group_mean, group_min, group_sum
-from .util import (ArrayType1D, ArrayType2D, TempName,
+from ..util import (ArrayType1D, ArrayType2D, TempName,
                    convert_array_inputs_to_dict, get_array_name)
 
 ArrayCollection = (

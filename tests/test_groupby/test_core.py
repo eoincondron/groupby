@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from groupby.core import GroupBy
-from groupby.util import MIN_INT
+from pandas_plus.groupby import GroupBy
+from pandas_plus.util import MIN_INT
 
 
 class TestGroupBy:

@@ -4,7 +4,7 @@ parametrize = pytest.mark.parametrize
 import numpy as np
 import pandas as pd
 
-from groupby import nanops
+from pandas_plus import nanops
 
 
 @pytest.fixture(scope="session")

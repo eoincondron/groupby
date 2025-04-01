@@ -5,7 +5,7 @@ import numba as nb
 import numpy as np
 from pandas.api.types import is_bool_dtype, is_float_dtype, is_integer_dtype
 
-from groupby.util import (ArrayType1D, check_data_inputs_aligned, is_null,
+from ..util import (ArrayType1D, check_data_inputs_aligned, is_null,
                           parallel_reduce)
 
 

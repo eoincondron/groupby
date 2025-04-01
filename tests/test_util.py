@@ -7,7 +7,7 @@ import polars as pl
 import polars.testing
 import pytest
 
-from groupby.util import (
+from pandas_plus.util import (
     MIN_INT, _get_first_non_null, convert_array_inputs_to_dict, get_array_name, is_null
 )
 
