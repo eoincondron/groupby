@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from pandas_plus.groupby import GroupBy
-from pandas_plus.util import MIN_INT
+from pandas_plus.util import MIN_INT, _null_value_for_array_type
 
 
 class TestGroupBy:
@@ -36,19 +36,37 @@ class TestGroupBy:
         pd.testing.assert_series_equal(result, expected, check_dtype=method != "mean")
 
     @pytest.mark.parametrize("use_mask", [True, False])
-    @pytest.mark.parametrize("dtype", [float, int])
     @pytest.mark.parametrize("method", ["sum", "mean", "min", "max"])
-    def test_with_nulls(self, method, dtype, use_mask):
-        null = MIN_INT if dtype == int else np.nan
-        key = np.array([1, 1, 2, 1, 3, 3, 6, 1, 6])
-        value = pd.Series([-1, 0, null, 3, 8, 6, null, 1, null], dtype=dtype)
-        not_null = value != null if dtype == int else value.notnull()
+    def test_floats_with_nulls(self, method, use_mask):
+        key = pd.Series([1, 1, 2, 1, 3, 3, 6, 1, 6])
+        series = pd.Series([.1, 0, 3.5, 3, 8, 6, 7, 1, 1.2],)
+        null_mask = key.isin([2, 6])
+        series = series.where(~null_mask)
         if use_mask:
-            mask = value < 6
-            pd_mask = mask & not_null
+            mask = key != 3
+            pd_mask = mask
         else:
             mask = None
-            pd_mask = not_null
-        result = getattr(GroupBy, method)(key, value, mask=mask)
-        expected = value[pd_mask].groupby(key[pd_mask]).agg(method)
+            pd_mask = slice(None)
+        result = getattr(GroupBy, method)(key, series, mask=mask)
+        expected = series[pd_mask].groupby(key[pd_mask]).agg(method).astype(result.dtype)
+        pd.testing.assert_series_equal(result, expected)
+
+
+    @pytest.mark.parametrize("use_mask", [True, False])
+    @pytest.mark.parametrize("method", ["mean", "min", "max"])
+    @pytest.mark.parametrize("dtype", ["datetime64[ns]", "timedelta64[ns]"])
+    def test_timestamps_with_nulls(self, method, use_mask, dtype):
+        key = pd.Series([1, 1, 2, 1, 3, 3, 6, 1, 6])
+        series = pd.Series(np.arange(len(key)), dtype=dtype)
+        null_mask = key.isin([2, 6])
+        series = series.where(~null_mask)
+        if use_mask:
+            mask = key != 3
+            pd_mask = mask
+        else:
+            mask = None
+            pd_mask = slice(None)
+        result = getattr(GroupBy, method)(key, series, mask=mask)
+        expected = series[pd_mask].groupby(key[pd_mask]).agg(method).astype(result.dtype)
         pd.testing.assert_series_equal(result, expected)

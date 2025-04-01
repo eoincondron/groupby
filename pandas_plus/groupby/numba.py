@@ -3,54 +3,10 @@ from typing import Callable
 
 import numba as nb
 import numpy as np
-from pandas.api.types import is_bool_dtype, is_float_dtype, is_integer_dtype
 
-from ..util import (ArrayType1D, check_data_inputs_aligned, is_null,
-                          parallel_reduce)
-
-
-def _scalar_func_decorator(func):
-    return staticmethod(nb.njit(nogil=True)(func))
-
-
-class NumbaReductionOps:
-
-    @_scalar_func_decorator
-    def count(x, y):
-        return x + 1
-
-    @_scalar_func_decorator
-    def min(x, y):
-        return x if x <= y else y
-
-    @_scalar_func_decorator
-    def max(x, y):
-        return x if x >= y else y
-
-    @staticmethod
-    @nb.njit
-    def sum(x, y):
-        return x + y
-
-    @_scalar_func_decorator
-    def first(x, y):
-        return x
-
-    @_scalar_func_decorator
-    def first_skipna(x, y):
-        return y if is_null(x) else x
-
-    @_scalar_func_decorator
-    def last(x, y):
-        return y
-
-    @_scalar_func_decorator
-    def last_skipna(x, y):
-        return x if is_null(y) else y
-
-    @_scalar_func_decorator
-    def sum_square(x, y):
-        return x + y**2
+from ..util import (ArrayType1D, check_data_inputs_aligned, is_null, _null_value_for_array_type,
+                    _maybe_cast_timestamp_arr, parallel_map, NumbaReductionOps)
+from .. import nanops
 
 
 @nb.njit(nogil=True, fastmath=False)
@@ -87,16 +43,11 @@ def _prepare_mask_for_numba(mask):
             raise TypeError(f"mask must of Boolean type. Got {mask.dtype}")
     return mask
 
-
-def get_initial_value_for_dtype(dtype):
-    if is_float_dtype(dtype):
-        return np.array(np.nan, dtype=dtype)
-    elif is_integer_dtype(dtype):
-        return np.iinfo(dtype).min
-    elif is_bool_dtype(dtype):
-        return True
+def _default_initial_value_for_type(arr):
+    if arr.dtype.kind == 'b':
+        return False
     else:
-        raise TypeError("Only floats, integer and Booleans are supported")
+        return _null_value_for_array_type(arr)
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
@@ -107,23 +58,20 @@ def _chunk_groupby_args(
     target: np.ndarray,
     mask: np.ndarray,
     reduce_func: Callable,
+    must_see: bool,
 ):
     mask = _prepare_mask_for_numba(mask)
     values = np.asarray(values)
 
-    chunked_args = []
-    for gk, v, m in map(
-        lambda a: np.array_split(a, n_chunks), [group_key, values, mask]
-    ):
-        kwargs = dict(
-            group_key=gk,
-            values=v,
-            target=target.copy(),
-            mask=m,
-            reduce_func=reduce_func,
-        )
-        bound_args = signature(_group_by_iterator).bind(**kwargs)
-        chunked_args.append(bound_args)
+    kwargs = locals().copy()
+    del kwargs['n_chunks']
+
+    chunked_kwargs = [kwargs.copy() for i in range(n_chunks)]
+    for name in ['group_key', 'values', 'mask']:
+        for chunk_no, arr in enumerate(np.array_split(kwargs[name], n_chunks)):
+            chunked_kwargs[chunk_no][name] = arr
+
+    chunked_args = [signature(_group_by_iterator).bind(**kwargs) for kwargs in chunked_kwargs]
 
     return chunked_args
 
@@ -138,9 +86,18 @@ def _group_func_wrap(
     mask: ArrayType1D = None,
     n_threads: int = 1,
 ):
-    target = np.full(ngroups, initial_value)
-    mask = _prepare_mask_for_numba(mask)
     values = np.asarray(values)
+    values, orig_type = _maybe_cast_timestamp_arr(values)
+    mask = _prepare_mask_for_numba(mask)
+    if initial_value is None:
+        initial_value = _default_initial_value_for_type(values)
+    target = np.full(ngroups, initial_value)
+    if reduce_func_name == 'count':
+        out_type = 'int64'
+    elif reduce_func_name == 'sum' and orig_type.kind == 'b':
+        out_type = 'int64'
+    else:
+        out_type = orig_type
 
     kwargs = dict(
         group_key=group_key,
@@ -152,12 +109,14 @@ def _group_func_wrap(
     )
 
     if n_threads == 1:
-        return _group_by_iterator(**kwargs)
+        return _group_by_iterator(**kwargs).astype(out_type)
     else:
         chunked_args = _chunk_groupby_args(**kwargs, n_chunks=n_threads)
-        return parallel_reduce(
-            _group_by_iterator, reduce_func_name, [args.args for args in chunked_args]
+        chunks = parallel_map(
+            _group_by_iterator, [args.args for args in chunked_args]
         )
+        arr = np.vstack(chunks)
+        return nanops.reduce_2d('sum', arr).astype(out_type)
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
@@ -180,12 +139,10 @@ def group_sum(
     mask: ArrayType1D = None,
     n_threads: int = 1,
 ):
-    if is_float_dtype(values):
-        initial_value = np.array(0.0, dtype=values.dtype)
-    elif is_integer_dtype(values) or is_bool_dtype(values):
-        initial_value = 0
+    if values.dtype.kind == 'f':
+        initial_value = 0.
     else:
-        raise TypeError("Only floats, integer and Booleans are supported")
+        initial_value = 0
     return _group_func_wrap("sum", **locals())
 
 
@@ -199,8 +156,12 @@ def group_mean(
 ):
     kwargs = locals().copy()
     sum = group_sum(**kwargs)
+    int_sum, orig_type = _maybe_cast_timestamp_arr(sum)
     count = group_count(**kwargs)
-    return sum / count
+    mean = (int_sum / count)
+    if values.dtype.kind in 'mM':
+        mean = mean.astype(orig_type)
+    return mean
 
 
 @check_data_inputs_aligned("group_key", "values", "mask")
@@ -211,7 +172,6 @@ def group_min(
     mask: ArrayType1D = None,
     n_threads: int = 1,
 ):
-    initial_value = get_initial_value_for_dtype(values.dtype)
     return _group_func_wrap("min", **locals())
 
 
@@ -223,7 +183,6 @@ def group_max(
     mask: ArrayType1D = None,
     n_threads: int = 1,
 ):
-    initial_value = get_initial_value_for_dtype(values.dtype)
     return _group_func_wrap("max", **locals())
 
 
@@ -238,19 +197,12 @@ class NumbaGroupByMethods:
         mask: ArrayType1D = None,
         skip_na=True,
     ):
-        initial_value = get_initial_value_for_dtype(values.dtype)
         if skip_na:
-            reduce_func = "first_skipna"
+            reduce_func_name = "first_skipna"
         else:
-            reduce_func = "first"
-        return _group_func_wrap(
-            reduce_func_name=reduce_func,
-            group_key=group_key,
-            values=values,
-            ngroups=ngroups,
-            initial_value=initial_value,
-            mask=mask,
-        )
+            reduce_func_name = "first"
+        del skip_na
+        return _group_func_wrap(**locals())
 
     @staticmethod
     @check_data_inputs_aligned("group_key", "values", "mask")
@@ -259,9 +211,14 @@ class NumbaGroupByMethods:
         values: ArrayType1D,
         ngroups: int,
         mask: ArrayType1D = None,
+        skip_na=True,
     ):
-        initial_value = get_initial_value_for_dtype(values.dtype)
-        return _group_func_wrap("last", **locals())
+        if skip_na:
+            reduce_func_name = "last_skipna"
+        else:
+            reduce_func_name = "last"
+        del skip_na
+        return _group_func_wrap(**locals())
 
 
 def _group_by_max_diff(group_key, values, max_diff, n_groups: int):

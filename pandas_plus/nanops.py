@@ -4,9 +4,8 @@ import numpy as np
 import pandas as pd
 from pandas.core import nanops
 
-from .numba import NumbaReductionOps
 from .util import (is_null, n_threads_from_array_length, parallel_map,
-                   _null_value_for_array_type, _get_first_non_null)
+                   _null_value_for_array_type, _get_first_non_null, NumbaReductionOps)
 
 
 @nb.njit(nogil=True)

@@ -73,6 +73,13 @@ def jit_is_null(x):
 
         return is_null
 
+@nb.njit(parallel=True)
+def arr_is_null(arr):
+    out = np.zeros(len(arr), dtype=nb.bool_)
+    for i in nb.prange(len(arr)):
+        out[i] = is_null(arr[i])
+    return out
+
 
 def _null_value_for_array_type(arr: np.ndarray):
     """
@@ -97,18 +104,29 @@ def _null_value_for_array_type(arr: np.ndarray):
     match arr.dtype.kind:
         case 'i':
             if arr.dtype.itemsize >= 4:
-                return np.iinfo(arr).min
+                return np.iinfo(arr.dtype).min
             else:
                 raise error
         case 'f':
             return np.array(np.nan, dtype=arr.dtype)
         case 'u':
             if arr.dtype.itemsize >= 4:
-                return np.iinfo(arr).max
+                return np.iinfo(arr.dtype).max
             else:
                 raise error
+        case 'm':
+            return np.array('NaT', dtype='m8[ns]')
+        case 'M':
+            return np.array('NaT', dtype='m8[ns]')
         case _:
             raise error
+
+
+def _maybe_cast_timestamp_arr(arr):
+    if arr.dtype.kind in 'mM':
+        return arr.view('int64'), arr.dtype
+    else:
+        return arr, arr.dtype
 
 
 def _remove_self_from_kwargs(kwargs: dict):
@@ -402,3 +420,45 @@ def jit_get_first_non_null(arr):
             return 0, arr[0]
 
         return f
+
+def _scalar_func_decorator(func):
+    return staticmethod(nb.njit(nogil=True)(func))
+
+
+class NumbaReductionOps:
+
+    @_scalar_func_decorator
+    def count(x, y):
+        return x + 1
+
+    @_scalar_func_decorator
+    def min(x, y):
+        return x if x <= y else y
+
+    @_scalar_func_decorator
+    def max(x, y):
+        return x if x >= y else y
+
+    @_scalar_func_decorator
+    def sum(x, y):
+        return x + y
+
+    @_scalar_func_decorator
+    def first(x, y):
+        return x
+
+    @_scalar_func_decorator
+    def first_skipna(x, y):
+        return y if is_null(x) else x
+
+    @_scalar_func_decorator
+    def last(x, y):
+        return y
+
+    @_scalar_func_decorator
+    def last_skipna(x, y):
+        return x if is_null(y) else y
+
+    @_scalar_func_decorator
+    def sum_square(x, y):
+        return x + y**2
