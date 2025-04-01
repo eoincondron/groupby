@@ -1,12 +1,15 @@
 import unittest
 
+import numba as nb
 import numpy as np
 import pandas as pd
 import polars as pl
 import polars.testing
 import pytest
 
-from groupby.util import convert_array_inputs_to_dict, get_array_name
+from groupby.util import (
+    MIN_INT, _get_first_non_null, convert_array_inputs_to_dict, get_array_name, is_null
+)
 
 
 class TestArrayFunctions(unittest.TestCase):
@@ -70,7 +73,7 @@ class TestArrayFunctions(unittest.TestCase):
             np.array([1, 2, 3]),
             np.array([4, 5, 6]),
         ]
-        expected = {"arr_0": arrays[0], "arr_1": arrays[1]}
+        expected = {"_arr_0": arrays[0], "_arr_1": arrays[1]}
         result = convert_array_inputs_to_dict(arrays)
         self.assertEqual(result.keys(), expected.keys())
         for k in expected:
@@ -82,7 +85,7 @@ class TestArrayFunctions(unittest.TestCase):
             np.array([4, 5, 6]),
             pd.Series([7, 8, 9]),
         ]
-        expected = {"named": arrays[0], "arr_1": arrays[1], "arr_2": arrays[2]}
+        expected = {"named": arrays[0], "_arr_1": arrays[1], "_arr_2": arrays[2]}
         result = convert_array_inputs_to_dict(arrays)
         self.assertEqual(result.keys(), expected.keys())
 
@@ -91,15 +94,15 @@ class TestArrayFunctions(unittest.TestCase):
         arr = np.array([1, 2, 3])
         result = convert_array_inputs_to_dict(arr)
         self.assertEqual(len(result), 1)
-        self.assertTrue("arr_0" in result)
-        np.testing.assert_array_equal(result["arr_0"], arr)
+        self.assertTrue("_arr_0" in result)
+        np.testing.assert_array_equal(result["_arr_0"], arr)
 
         # Test with 2D numpy array (should return empty dict as per function logic)
         arr_2d = np.array([[1, 2], [3, 4]])
         result = convert_array_inputs_to_dict(arr_2d)
-        self.assertEqual(list(result), ["arr_0", "arr_1"])
+        self.assertEqual(list(result), ["_arr_0", "_arr_1"])
 
-        np.testing.assert_array_equal(result["arr_0"], arr_2d[:, 0])
+        np.testing.assert_array_equal(result["_arr_0"], arr_2d[:, 0])
 
     def test_convert_series_to_dict(self):
         # Test with named pandas Series
@@ -113,8 +116,8 @@ class TestArrayFunctions(unittest.TestCase):
         series = pd.Series([1, 2, 3])
         result = convert_array_inputs_to_dict(series)
         self.assertEqual(len(result), 1)
-        self.assertTrue("arr_0" in result)
-        pd.testing.assert_series_equal(result["arr_0"], series)
+        self.assertTrue("_arr_0" in result)
+        pd.testing.assert_series_equal(result["_arr_0"], series)
 
         # Test with polars Series
         series = pl.Series("polars_series", [1, 2, 3])
@@ -144,6 +147,117 @@ class TestArrayFunctions(unittest.TestCase):
         # Test with unsupported type
         with pytest.raises(TypeError, match="Input type <class 'int'> not supported"):
             convert_array_inputs_to_dict(123)
+
+
+class TestIsNullFunction(unittest.TestCase):
+    def test_is_null_python_floats(self):
+        """Test is_null with Python float values"""
+        self.assertTrue(is_null(float('nan')))
+        self.assertFalse(is_null(0.0))
+        self.assertFalse(is_null(-1.5))
+        self.assertFalse(is_null(1e10))
+
+    def test_is_null_numpy_floats(self):
+        """Test is_null with NumPy float values"""
+        self.assertTrue(is_null(np.nan))
+        self.assertTrue(is_null(np.float64('nan')))
+        self.assertFalse(is_null(np.float64(0.0)))
+        self.assertFalse(is_null(np.float32(-1.5)))
+
+    def test_is_null_integers(self):
+        """Test is_null with integer values"""
+        self.assertFalse(is_null(0))
+        self.assertFalse(is_null(-1))
+        self.assertFalse(is_null(100))
+        # MIN_INT should be considered null for integers
+        self.assertTrue(is_null(MIN_INT))
+
+    def test_is_null_booleans(self):
+        """Test is_null with boolean values"""
+        self.assertFalse(is_null(True))
+        self.assertFalse(is_null(False))
+
+
+# Numba-compiled test functions to test the JIT implementation
+@nb.njit
+def test_jit_float_null():
+    return is_null(np.nan), is_null(0.0)
+
+@nb.njit
+def test_jit_int_null():
+    return is_null(MIN_INT), is_null(0)
+
+@nb.njit
+def test_jit_bool_null():
+    return is_null(True), is_null(False)
+
+
+class TestJitIsNull(unittest.TestCase):
+    def test_jit_is_null_floats(self):
+        """Test JIT-compiled is_null with float values"""
+        is_nan_null, is_zero_null = test_jit_float_null()
+        self.assertTrue(is_nan_null)
+        self.assertFalse(is_zero_null)
+
+    def test_jit_is_null_integers(self):
+        """Test JIT-compiled is_null with integer values"""
+        is_min_int_null, is_zero_null = test_jit_int_null()
+        self.assertTrue(is_min_int_null)
+        self.assertFalse(is_zero_null)
+
+    def test_jit_is_null_booleans(self):
+        """Test JIT-compiled is_null with boolean values"""
+        is_true_null, is_false_null = test_jit_bool_null()
+        self.assertFalse(is_true_null)
+        self.assertFalse(is_false_null)
+
+
+# Test functions for _get_first_non_null
+@nb.njit
+def test_jit_get_first_non_null_with_nans():
+    arr = np.array([np.nan, np.nan, 3.0, 4.0, np.nan])
+    return _get_first_non_null(arr)
+
+@nb.njit
+def test_jit_get_first_non_null_all_nans():
+    arr = np.array([np.nan, np.nan, np.nan])
+    return _get_first_non_null(arr)
+
+@nb.njit
+def test_jit_get_first_non_null_no_nans():
+    arr = np.array([1.0, 2.0, 3.0])
+    return _get_first_non_null(arr)
+
+@nb.njit
+def test_jit_get_first_non_null_with_integers():
+    arr = np.array([MIN_INT, 1, 2, MIN_INT])
+    return _get_first_non_null(arr)
+
+
+class TestGetFirstNonNull(unittest.TestCase):
+    def test_get_first_non_null_with_nans(self):
+        """Test _get_first_non_null with array containing NaN values"""
+        idx, val = test_jit_get_first_non_null_with_nans()
+        self.assertEqual(idx, 2)
+        self.assertEqual(val, 3.0)
+
+    def test_get_first_non_null_all_nans(self):
+        """Test _get_first_non_null with array of all NaN values"""
+        idx, val = test_jit_get_first_non_null_all_nans()
+        self.assertEqual(idx, -1)
+        self.assertTrue(np.isnan(val))
+
+    def test_get_first_non_null_no_nans(self):
+        """Test _get_first_non_null with array containing no NaN values"""
+        idx, val = test_jit_get_first_non_null_no_nans()
+        self.assertEqual(idx, 0)
+        self.assertEqual(val, 1.0)
+        
+    def test_get_first_non_null_with_integers(self):
+        """Test _get_first_non_null with integer array containing MIN_INT values"""
+        idx, val = test_jit_get_first_non_null_with_integers()
+        self.assertEqual(idx, 1)
+        self.assertEqual(val, 1)
 
 
 if __name__ == "__main__":

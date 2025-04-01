@@ -40,7 +40,15 @@ def is_null(x):
     This function is overloaded with specialized implementations for 
     various numeric types via Numba's overload mechanism.
     """
-    return np.isnan(x)
+    dtype = np.asarray(x).dtype
+    if np.issubdtype(dtype, np.float64):
+        return np.isnan(x)
+
+    elif np.issubdtype(dtype, np.int64):
+        return x == MIN_INT
+
+    else:
+        return False
 
 
 @overload(is_null)
@@ -48,6 +56,7 @@ def jit_is_null(x):
     if isinstance(x, nb.types.Float) or isinstance(x, float):
 
         def is_null(x):
+
             return np.isnan(x)
 
         return is_null
@@ -346,3 +355,50 @@ def parallel_reduce(reducer, reduce_func_name: str, chunked_args):
         raise ValueError(f"Multi-threading not supported for {reduce_func_name}")
     results = parallel_map(reducer, chunked_args)
     return reduce(reduce_func_vec, results)
+
+
+def _get_first_non_null(arr) -> (int, T):
+    """
+    Find the first non-null value in an array. Return its location and value
+
+    Parameters
+    ----------
+    arr : array-like
+        Array to search for non-null values
+
+    Returns
+    -------
+    tuple
+        (index, value) of first non-null value, or (-1, np.nan) if all values are null
+
+    Notes
+    -----
+    This function is JIT-compiled with Numba for performance.
+    """
+    for i, x in enumerate(arr):
+        if not is_null(x):
+            return i, x
+    return -1, np.nan
+
+
+@overload(_get_first_non_null, nogil=True)
+def jit_get_first_non_null(arr):
+    if isinstance(arr.dtype, nb.types.Float):
+
+        return _get_first_non_null
+
+    elif isinstance(arr.dtype, nb.types.Integer):
+
+        def f(arr):
+            for i, x in enumerate(arr):
+                if not is_null(x):
+                    return i, x
+            return -1, MIN_INT
+
+        return f
+
+    elif arr.dtype.kind == 'b':
+        def f(x):
+            return 0, arr[0]
+
+        return f

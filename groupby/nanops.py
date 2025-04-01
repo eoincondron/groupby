@@ -6,32 +6,7 @@ from pandas.core import nanops
 
 from .numba import NumbaReductionOps
 from .util import (is_null, n_threads_from_array_length, parallel_map,
-                   _null_value_for_array_type)
-
-
-@nb.njit(nogil=True)
-def _get_first_non_null(arr):
-    """
-    Find the first non-null value in an array.
-    
-    Parameters
-    ----------
-    arr : array-like
-        Array to search for non-null values
-        
-    Returns
-    -------
-    tuple
-        (index, value) of first non-null value, or (-1, np.nan) if all values are null
-    
-    Notes
-    -----
-    This function is JIT-compiled with Numba for performance.
-    """
-    for i, x in enumerate(arr):
-        if not is_null(x):
-            return i, x
-    return -1, np.nan
+                   _null_value_for_array_type, _get_first_non_null)
 
 
 @nb.njit(nogil=True)
@@ -110,12 +85,18 @@ def reduce_1d(reduce_func_name: str, arr, skipna: bool = True, n_threads: int = 
     # Check for datetime64 or timedelta64 dtypes
     is_datetime = np.issubdtype(arr.dtype, np.datetime64)
     is_timedelta = np.issubdtype(arr.dtype, np.timedelta64)
-    
     is_count = reduce_func_name == "count"
+    if is_datetime and not is_count:
+        output_converter = pd.to_datetime
+    elif is_timedelta and not is_count:
+        output_converter = pd.to_timedelta
+    else:
+        output_converter = np.asarray
+
     if is_count:
         kwargs = dict(
             skipna=True,
-            initial_value=0,
+            initial_value=int(0),
         )
         chunk_reduction = 'sum'
     elif "sum" in reduce_func_name:
@@ -139,19 +120,19 @@ def reduce_1d(reduce_func_name: str, arr, skipna: bool = True, n_threads: int = 
         n_threads = n_threads_from_array_length(len(arr))
 
     if n_threads == 1:
-        result = _nb_reduce(reduce_func=reduce_func, arr=arr, **kwargs)
+        result = output_converter(_nb_reduce(reduce_func=reduce_func, arr=arr, **kwargs))
     else:
         chunks = parallel_map(
             lambda a: _nb_reduce(reduce_func=reduce_func, arr=a, **kwargs),
             list(zip(np.array_split(arr, n_threads))),
         )
-        result = reduce_1d(chunk_reduction, np.array(chunks), skipna=skipna, n_threads=1)
-    
-    # Convert result back to datetime64/timedelta64 if needed
-    if is_datetime and not is_count:
-        return pd.Timestamp(result)
-    elif is_timedelta and not is_count:
-        return pd.Timedelta(result)
+        chunks = output_converter(chunks)
+        result = reduce_1d(chunk_reduction, chunks, skipna=skipna, n_threads=1)
+
+    return result
+
+    if is_count:
+        result = np.int64(result)
 
     return result
 

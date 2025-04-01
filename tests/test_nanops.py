@@ -36,6 +36,26 @@ def test_reduce_1d(series, op_name, with_nans, skipna, n_threads, integers):
     np.testing.assert_array_almost_equal(result, expected)
 
 
+@parametrize("op_name", ["min", "max", "count"])
+@parametrize("with_nans", [False, True])
+@parametrize("skipna", [True, False])
+@parametrize("n_threads", [1, 2])
+@parametrize("dtype", ['datetime64[ns]', 'timedelta64[ns]'])
+def test_reduce_1d_timestamps(op_name, with_nans, skipna, n_threads, dtype):
+    series = pd.Series(np.arange(100, 200), dtype=dtype)
+    if with_nans:
+        series = series.where(series.index > 1)
+    result = nanops.reduce_1d(
+        op_name, series.values, skipna=skipna, n_threads=n_threads
+    )
+    if op_name == "count":
+        assert result == series.count()
+    else:
+        expected = series.agg(op_name, skipna=skipna)
+        # testing scalars here but using Series as a hack to equate pd.NaT
+        pd.testing.assert_series_equal(pd.Series(expected), pd.Series(result))
+
+
 @parametrize("op_name", ["min", "max", "sum", "mean", "std", "var"])
 @parametrize("with_nans", [False, True])
 @parametrize("skipna", [True, False])
