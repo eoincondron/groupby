@@ -1,19 +1,138 @@
+
+
+import functools
+
 from inspect import signature
+from typing import Mapping, Union, Any, Callable, TypeVar, cast
+
+import numba as nb
 import numpy as np
 import pandas as pd
 import polars as pl
-from typing import Union, Mapping
+from numba.core.extending import overload
 
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+MIN_INT = np.iinfo(np.int64).min
+MAX_INT = np.iinfo(np.int64).max
 
 ArrayType1D = Union[np.ndarray, pl.Series, pd.Series, pd.Index, pd.Categorical]
 ArrayType2D = Union[np.ndarray, pl.DataFrame, pd.DataFrame, pd.MultiIndex]
 
 
+def is_null(x):
+    """
+    Check if a value is considered null/NA.
+    
+    Parameters
+    ----------
+    x : scalar
+        Value to check
+        
+    Returns
+    -------
+    bool
+        True if value is null, False otherwise
+        
+    Notes
+    -----
+    This function is overloaded with specialized implementations for 
+    various numeric types via Numba's overload mechanism.
+    """
+    return np.isnan(x)
+
+
+@overload(is_null)
+def jit_is_null(x):
+    if isinstance(x, nb.types.Float) or isinstance(x, float):
+
+        def is_null(x):
+            return np.isnan(x)
+
+        return is_null
+    if isinstance(x, nb.types.Integer):
+
+        def is_null(x):
+            return x == MIN_INT
+
+        return is_null
+    elif isinstance(x, nb.types.Boolean):
+
+        def is_null(x):
+            return False
+
+        return is_null
+
+
+def _null_value_for_array_type(arr: np.ndarray):
+    """
+    Get the appropriate null/NA value for the given array's dtype.
+    
+    Parameters
+    ----------
+    arr : np.ndarray
+        Array whose dtype determines the null value
+        
+    Returns
+    -------
+    scalar
+        Appropriate null value (min value for integers, NaN for floats, max for unsigned)
+        
+    Raises
+    ------
+    TypeError
+        If the array's dtype doesn't have a defined null representation
+    """
+    error = TypeError(f"No null value for {arr.dtype}")
+    match arr.dtype.kind:
+        case 'i':
+            if arr.dtype.itemsize >= 4:
+                return np.iinfo(arr).min
+            else:
+                raise error
+        case 'f':
+            return np.array(np.nan, dtype=arr.dtype)
+        case 'u':
+            if arr.dtype.itemsize >= 4:
+                return np.iinfo(arr).max
+            else:
+                raise error
+        case _:
+            raise error
+
+
 def _remove_self_from_kwargs(kwargs: dict):
+    """
+    Remove 'self' and 'cls' parameters from a kwargs dictionary.
+    
+    Parameters
+    ----------
+    kwargs : dict
+        Dictionary of keyword arguments
+        
+    Returns
+    -------
+    dict
+        Dictionary with 'self' and 'cls' keys removed
+    """
     return {k: v for k, v in kwargs.items() if k not in ("self", "cls")}
 
 
 def get_array_name(array: Union[np.ndarray, pd.Series, pl.Series]):
+    """
+    Get the name attribute of an array if it exists and is not empty.
+    
+    Parameters
+    ----------
+    array : Union[np.ndarray, pd.Series, pl.Series]
+        Array-like object to get name from
+        
+    Returns
+    -------
+    str or None
+        The name of the array if it exists and is not empty, otherwise None
+    """
     name = getattr(array, "name", None)
     if name is None or name == "":
         return None
@@ -24,6 +143,27 @@ class TempName(str): ...
 
 
 def convert_array_inputs_to_dict(arrays, temp_name_root: str = "_arr_") -> dict:
+    """
+    Convert various array-like inputs to a dictionary of named arrays.
+    
+    Parameters
+    ----------
+    arrays : Various types
+        Input arrays in various formats (Mapping, list/tuple of arrays, 2D array,
+        pandas/polars Series or DataFrame)
+    temp_name_root : str, default "_arr_"
+        Prefix to use for generating temporary names for unnamed arrays
+        
+    Returns
+    -------
+    dict
+        Dictionary mapping array names to arrays
+        
+    Raises
+    ------
+    TypeError
+        If the input type is not supported
+    """
     if isinstance(arrays, Mapping):
         return dict(arrays)
     elif isinstance(arrays, (tuple, list)):
@@ -43,13 +183,6 @@ def convert_array_inputs_to_dict(arrays, temp_name_root: str = "_arr_") -> dict:
         return {key: arrays[key] for key in arrays.columns}
     else:
         raise TypeError(f"Input type {type(arrays)} not supported")
-
-
-import functools
-import pandas as pd
-from typing import Callable, Any, TypeVar, cast
-
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 def check_data_inputs_aligned(
@@ -106,7 +239,7 @@ def check_data_inputs_aligned(
 
 
 import concurrent.futures
-from typing import TypeVar, Callable, List, Any, Optional
+from typing import Any, Callable, List, Optional, TypeVar
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -156,16 +289,51 @@ def parallel_map(
     return results
 
 
-import os
 import operator
+import os
 from functools import reduce
 
 
 def n_threads_from_array_length(arr_len: int):
+    """
+    Calculate a reasonable number of threads based on array length.
+    
+    Parameters
+    ----------
+    arr_len : int
+        Length of the array to be processed
+        
+    Returns
+    -------
+    int
+        Number of threads to use (at least 1, at most 2*cpu_count-2)
+    """
     return min(max(1, arr_len // int(2e6)), os.cpu_count() * 2 - 2)
 
 
 def parallel_reduce(reducer, reduce_func_name: str, chunked_args):
+    """
+    Apply reduction function in parallel and combine results.
+    
+    Parameters
+    ----------
+    reducer : callable
+        Function to apply to each chunk of data
+    reduce_func_name : str
+        Name of the reduction function ('count', 'sum', 'max', etc.)
+    chunked_args : list
+        Arguments for the reducer function split into chunks
+        
+    Returns
+    -------
+    array-like
+        Combined result after applying the reduction function to all chunks
+        
+    Raises
+    ------
+    ValueError
+        If the reduction function is not supported for parallel execution
+    """
     try:
         reduce_func_vec = dict(
             count=operator.add,

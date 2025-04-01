@@ -1,12 +1,9 @@
+import numpy as np
 import pandas as pd
 import pytest
-import numpy as np
 
-from groupby.numba import MIN_INT
 from groupby.core import GroupBy
-
-
-# Unit tests
+from groupby.util import MIN_INT
 
 
 class TestGroupBy:

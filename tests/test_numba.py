@@ -1,17 +1,10 @@
-import pytest
-import numpy as np
 import numba as nb
+import numpy as np
+import pytest
 
-from groupby.numba import (
-    NumbaReductionOps,
-    NumbaGroupByMethods,
-    group_sum,
-    group_mean,
-    group_count,
-    group_min,
-    MIN_INT,
-    is_null as py_isnull,
-)
+from groupby.numba import (NumbaGroupByMethods, NumbaReductionOps,
+                           group_count, group_mean, group_min, group_sum)
+from groupby.util import is_null as py_isnull, MIN_INT
 
 
 @nb.njit

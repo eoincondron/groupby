@@ -1,9 +1,10 @@
 import unittest
-import pytest
+
 import numpy as np
 import pandas as pd
 import polars as pl
 import polars.testing
+import pytest
 
 from groupby.util import convert_array_inputs_to_dict, get_array_name
 

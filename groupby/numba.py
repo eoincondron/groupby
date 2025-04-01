@@ -1,45 +1,12 @@
-import operator
-from typing import Callable
 from inspect import signature
-from functools import reduce
-import concurrent.futures
+from typing import Callable
 
 import numba as nb
-from numba.extending import overload
 import numpy as np
-from pandas.api.types import is_float_dtype, is_integer_dtype, is_bool_dtype
+from pandas.api.types import is_bool_dtype, is_float_dtype, is_integer_dtype
 
-from groupby.util import check_data_inputs_aligned, ArrayType1D, parallel_reduce
-
-
-MIN_INT = np.iinfo(np.int64).min
-MAX_INT = np.iinfo(np.int64).max
-
-
-def is_null(x):
-    return np.isnan(x)
-
-
-@overload(is_null)
-def jit_is_null(x):
-    if isinstance(x, nb.types.Float) or isinstance(x, float):
-
-        def is_null(x):
-            return np.isnan(x)
-
-        return is_null
-    if isinstance(x, nb.types.Integer):
-
-        def is_null(x):
-            return x == MIN_INT
-
-        return is_null
-    elif isinstance(x, nb.types.Boolean):
-
-        def is_null(x):
-            return False
-
-        return is_null
+from groupby.util import (ArrayType1D, check_data_inputs_aligned, is_null,
+                          parallel_reduce)
 
 
 def _scalar_func_decorator(func):
